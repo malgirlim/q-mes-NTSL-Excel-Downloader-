@@ -1,51 +1,24 @@
 <script setup lang="ts">
-import { onMounted, ref, Ref } from "vue";
-import _ from "lodash";
+import _, { isArguments } from "lodash";
+import { ref, Ref } from "vue";
+import Button from "../base-components/Button";
+import { FormInput, FormSelect, FormCheck } from "../base-components/Form";
 import Lucide from "../base-components/Lucide";
-import Tippy from "../base-components/Tippy";
-import LineChart1 from "../components/LineChart1";
-import LineChart2 from "../components/LineChart2";
-import LineChart3 from "../components/LineChart3";
-import moment from "moment";
 import Table from "../base-components/Table";
+import moment from "moment";
 
-import PaginationComponent from "../components/Pagination/PaginationComponent.vue"; // 페이징설정
+import { read, utils, writeFileXLSX } from "xlsx";
+
+import Litepicker from "../base-components/Litepicker";
 
 // API 보내는 함수 및 인터페이스 불러오기
 import { useSendApi } from "../composables/useSendApi";
-import {
-  MonitorKpiProd,
-  MonitorKpiStock,
-  MonitorSafe,
-  MonitorStock,
-} from "../interfaces/menu/monitorInterface";
-
-// #####  페이지 로딩 시 데이터 불러오기 및 5초마다 데이터 다시 불러오기  #####
-onMounted(async () => {
-  await monitor_safe.loadDatas();
-  await monitor_kpi_prod.loadDatas();
-  await monitor_kpi_stock.loadDatas();
-  setInterval(async () => {
-    await monitor_stock.searchDatas(
-      "22/01/01 - " + moment().add(-1, "days").format("YY/MM/DD"),
-      "전체",
-      ""
-    );
-    const monitor_stock_data_past = monitor_stock.datas.value;
-    monitor_stock.searchDatas(
-      "22/01/01 - " + moment().format("YY/MM/DD"),
-      "전체",
-      ""
-    );
-    const monitor_stock_data_current = monitor_stock.datas.value;
-  }, 60000);
-
-  setInterval(() => {
-    now.value = moment().format("YYYY-MM-DD HH:mm:ss");
-  }, 1000);
-});
+import { StockReceive } from "../interfaces/menu/stockInterface";
+import { MasterProduct } from "../interfaces/menu/MasterInterface";
 
 // 페이징기능
+import { onMounted, watch } from "vue";
+import PaginationComponent from "../components/Pagination/PaginationComponent.vue"; // 페이징설정
 const currentPage = ref(1); // 현재페이지
 const rowsPerPage = ref(10); // 한 페이지에 보여질 데이터 갯수
 
@@ -54,498 +27,444 @@ const pageChange = () => {
   currentPage.value = 1;
 };
 
-// api 보내기 - 실시간 생산량
+// SheetJS(엑셀출력) 용
 
-// api 보내기 - 월 평균 시간당 생산량
-const monitor_kpi_prod_url = "/api/monitor/kpi-prod";
-const monitor_kpi_prod = useSendApi<MonitorKpiProd>(
-  monitor_kpi_prod_url,
-  currentPage,
-  rowsPerPage
-);
+function exportFile(data: any) {
+  console.log(data);
+  const ws = utils.json_to_sheet(data);
+  const wb = utils.book_new();
+  utils.book_append_sheet(wb, ws, "Data");
+  writeFileXLSX(
+    wb,
+    "data_" + moment().format("YYMMDD_HHmmss") + "_export.xlsx"
+  );
+}
 
-// api 보내기 - 월간 재고비용 절감률
-const monitor_kpi_stock_url = "/api/monitor/kpi-stock";
-const monitor_kpi_stock = useSendApi<MonitorKpiStock>(
-  monitor_kpi_stock_url,
-  currentPage,
-  rowsPerPage
-);
+// api 보내기
+const url = "/api/stock/receive";
+const {
+  datas,
+  dataAll,
+  dataCount,
+  datasAreLoading,
+  loadDatas,
+  searchDatas,
+  insertData,
+  editData,
+  deleteData,
+  numberOfPages,
+} = useSendApi<StockReceive>(url, currentPage, rowsPerPage);
 
-// api 보내기 - 안전재고 미달
-const monitor_safe_url = "/api/monitor/safe";
-const monitor_safe = useSendApi<MonitorSafe>(
-  monitor_safe_url,
-  currentPage,
-  rowsPerPage
-);
+// api2 : 품목등록데이터 가져오기
+const url_2 = "/api/master/product";
+const product = useSendApi<MasterProduct>(url_2, currentPage, rowsPerPage);
 
-// 안전재고 미달 어제 대비 상승 구하기
-const monitor_stock_url = "/api/monitor/stock";
-const monitor_stock = useSendApi<MonitorStock>(
-  monitor_stock_url,
-  currentPage,
-  rowsPerPage
-);
+const searchKey = ref("전체");
+const searchInput = ref("");
+onMounted(async () => {
+  loadDatas();
+  product.loadDatas();
+}); // 페이지 로딩 시 데이터 불러오기
 
-// 날짜 구하기
-const now = ref(moment().format("YYYY-MM-DD HH:mm:ss"));
-
-// 하단 표시
-const bottom_list = [
-  "실시간 생산량",
-  "시간당 생산량",
-  "재고비용 절감률",
-  "안전재고 미달",
-];
-const bottom = ref("실시간 생산량"); // 처음 표시할 것
-const changeBottom = (cb: string) => {
-  bottom.value = cb;
+// 조회
+const search = () => {
+  // console.log(searchKey.value, searchInput.value);
+  searchDatas(now2.value, searchKey.value, searchInput.value);
 };
 
-// 테이블 열 크기 조정 (안전재고 미달)
+// 날짜 구하기
+const now = moment().format("YYYY-MM-DD");
+const nowPlus = moment().add(7, "days").format("YYYY-MM-DD");
+const max_year = moment().format("YYYY");
+const min_year = moment().add(-3, "years").format("YYYY");
+let now2 = ref("전체기간");
+
+// now2가 변경되면 실행
+watch([now2], (newValue, oldValue) => {
+  search();
+  pageChange();
+});
+
+// 날짜 리셋
+const reset_date = () => {
+  now2.value = "전체기간";
+  const litepicker_init = document.querySelector("#litepicker") as any;
+  litepicker_init.value = "전체기간";
+};
+
+// 체크박스 선택으로 데이터 가져오기
+const checkDebug: any = ref([]); // 체크박스 선택 데이터 저장변수
+
+const mainCheckBox = ref(true); // 메인 체크박스 상태
+const checkAll = (value: boolean) => {
+  // 메인 체크박스가 눌릴 때 모두 체크
+  const checkboxes = document.querySelectorAll("input[id=checkbox]"); // input의 id가 checkbox인 요소를 가져오기
+  // 만약 메인 체크박스가 눌렸다면
+  if (value === true) {
+    checkDebug.value = []; // 체크박스 선택 데이터 초기화
+    checkboxes.forEach((cb: any) => {
+      cb.checked = value; // 모든 체크박스를 메인체크박스에 맞춰서 바꿈
+      checkDebug.value.push(cb.value); // 모든 체크박스의 value를 가져와 저장
+    });
+  } else {
+    checkboxes.forEach((cb: any) => {
+      cb.checked = value;
+      checkDebug.value = [];
+    });
+  }
+};
+
+const resetCheckBox = () => {
+  // 페이징 넘기면 체크박스 데이터 초기화
+  const mBox = document.querySelector<HTMLElement>(
+    "input[id=checkbox_all]"
+  ) as HTMLInputElement | null; // 오류 안뜨게 하려고 넣어둔것
+  if (!mBox) return; // 오류 안뜨게 하려고 넣어둔것
+  mBox.checked = false; // 메인체크박스 체크해제
+  mainCheckBox.value = true; // 메인체크박스 데이터 초기화
+  checkDebug.value = [];
+};
+// 테이블 열 크기 조정
 const table_width = [
+  "width: 50px", // 체크박스
   "width: 50px", // 순번
-  "width: 50px", // 품목코드
+  "width: 150px", // 입고일시
+  "width: 200px", // 품목코드
   "width: 150px", // 거래처명
-  "width: 300px", // 품명
-  "width: 100px", // 규격
-  "width: 100px", // 단위
-  "width: 50px", // 재고수
-  "width: 50px", // 안전재고수
-  "width: 50px", // 부족재고수
-  "width: 150px", // 링크
+  "width: 250px", // 품명
+  "width: 250px", // 규격
+  "width: 50px", // 단위
+  "width: 50px", // 출고수
+  "width: 200px", // 비고
+  "width: 100px", // 편집
 ];
 </script>
 
 <template>
-  <div>
-    <div class="grid-cols-12 gap-6">
-      <div class="col-span-12 2xl:col-span-9">
-        <div class="grid grid-cols-12 gap-6">
-          <!-- BEGIN: General Report -->
-          <div class="col-span-12 mt-8">
-            <div class="flex items-center h-10 intro-y">
-              <h2 class="mr-5 text-lg font-medium truncate">{{ now }} 현재</h2>
-
-              <a href="" class="flex items-center ml-auto text-primary">
-                <Lucide icon="RefreshCcw" class="w-4 h-4 mr-3" /> 새로고침
-              </a>
-            </div>
-            <div class="grid grid-cols-12 gap-6 mt-5">
-              <div class="col-span-12 sm:col-span-6 xl:col-span-3 intro-y">
-                <div
-                  :class="[
-                    'relative zoom-in',
-                    'before:content-[\'\'] before:w-[90%] before:shadow-[0px_3px_20px_#0000000b] before:bg-slate-50 before:h-full before:mt-3 before:absolute before:rounded-md before:mx-auto before:inset-x-0 before:dark:bg-darkmode-400/70',
-                  ]"
-                >
-                  <div class="p-5 box" @click="changeBottom(bottom_list[0])">
-                    <div class="flex">
-                      <Lucide
-                        icon="Clock"
-                        class="w-[28px] h-[28px] text-primary"
-                      />
-                      <div class="ml-auto">
-                        <Tippy
-                          as="div"
-                          class="cursor-pointer bg-success py-[3px] flex rounded-full text-white text-xs pl-2 pr-1 items-center font-medium"
-                          content="1시간 전보다 2개 감소"
-                        >
-                          2개
-                          <Lucide icon="ChevronDown" class="w-4 h-4 ml-0.5" />
-                        </Tippy>
-                      </div>
-                    </div>
-                    <div class="mt-6 text-3xl font-medium leading-8">2 /10</div>
-                    <div class="mt-1 text-base text-slate-500">
-                      실시간 생산 현황 (현재/누적)
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="col-span-9 sm:col-span-6 xl:col-span-3 intro-y">
-                <div
-                  :class="[
-                    'relative zoom-in',
-                    'before:content-[\'\'] before:w-[90%] before:shadow-[0px_3px_20px_#0000000b] before:bg-slate-50 before:h-full before:mt-3 before:absolute before:rounded-md before:mx-auto before:inset-x-0 before:dark:bg-darkmode-400/70',
-                  ]"
-                >
-                  <div class="p-5 box" @click="changeBottom(bottom_list[1])">
-                    <div class="flex">
-                      <Lucide
-                        icon="Factory"
-                        class="w-[28px] h-[28px] text-primary"
-                      />
-                      <div class="ml-auto">
-                        <Tippy
-                          as="div"
-                          class="cursor-pointer bg-success py-[3px] flex rounded-full text-white text-xs pl-2 pr-1 items-center font-medium"
-                          content="어제보다 2개 감소"
-                        >
-                          2개
-                          <Lucide icon="ChevronDown" class="w-4 h-4 ml-0.5" />
-                        </Tippy>
-                      </div>
-                    </div>
-                    <div class="mt-6 text-3xl font-medium leading-8">12</div>
-                    <div class="mt-1 text-base text-slate-500">
-                      KPI / 월 평균 시간당 생산량
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="col-span-12 sm:col-span-6 xl:col-span-3 intro-y">
-                <div
-                  :class="[
-                    'relative zoom-in',
-                    'before:content-[\'\'] before:w-[90%] before:shadow-[0px_3px_20px_#0000000b] before:bg-slate-50 before:h-full before:mt-3 before:absolute before:rounded-md before:mx-auto before:inset-x-0 before:dark:bg-darkmode-400/70',
-                  ]"
-                >
-                  <div class="p-5 box" @click="changeBottom(bottom_list[2])">
-                    <div class="flex">
-                      <Lucide
-                        icon="Wallet"
-                        class="w-[28px] h-[28px] text-primary"
-                      />
-                      <div class="ml-auto">
-                        <Tippy
-                          as="div"
-                          class="cursor-pointer bg-danger py-[3px] flex rounded-full text-white text-xs pl-2 pr-1 items-center font-medium"
-                          content="어제보다 12% 상승"
-                        >
-                          12%
-                          <Lucide icon="ChevronUp" class="w-4 h-4 ml-0.5" />
-                        </Tippy>
-                      </div>
-                    </div>
-                    <div class="mt-6 text-3xl font-medium leading-8">92%</div>
-                    <div class="mt-1 text-base text-slate-500">
-                      KPI / 월간 재고 비용 절감률
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="col-span-12 sm:col-span-6 xl:col-span-3 intro-y">
-                <div
-                  :class="[
-                    'relative zoom-in',
-                    'before:content-[\'\'] before:w-[90%] before:shadow-[0px_3px_20px_#0000000b] before:bg-slate-50 before:h-full before:mt-3 before:absolute before:rounded-md before:mx-auto before:inset-x-0 before:dark:bg-darkmode-400/70',
-                  ]"
-                >
-                  <div class="p-5 box" @click="changeBottom(bottom_list[3])">
-                    <div class="flex">
-                      <Lucide
-                        icon="Siren"
-                        class="w-[28px] h-[28px] text-danger"
-                      />
-                      <div class="ml-auto">
-                        <Tippy
-                          as="div"
-                          class="cursor-pointer bg-danger py-[3px] flex rounded-full text-white text-xs pl-2 pr-1 items-center font-medium"
-                          content="어제보다 3건 상승"
-                        >
-                          3건
-                          <Lucide icon="ChevronUp" class="w-4 h-4 ml-0.5" />
-                        </Tippy>
-                      </div>
-                    </div>
-                    <div class="mt-6 text-3xl font-medium leading-8">
-                      {{ monitor_safe.dataCount }}
-                    </div>
-                    <div class="mt-1 text-base text-slate-500">
-                      안전재고 미달
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- END: General Report -->
-        </div>
-      </div>
-    </div>
-  </div>
-  <!-- BEGIN: Chart -->
-  <div>
-    <div class="mt-10 intro-y"></div>
-    <!--실시간 생산량 차트-->
-    <div v-if="bottom == bottom_list[0]" class="p-5 mt-12 intro-y box sm:mt-5">
-      <div class="flex flex-col md:flex-row md:items-center">
-        <div class="flex">
-          <div>
-            <div
-              class="text-lg font-medium text-primary dark:text-slate-300 xl:text-xl"
-            >
-              2개
-            </div>
-            <div class="mt-0.5 text-slate-500">1시간</div>
-          </div>
-          <div
-            class="w-px h-12 mx-4 border border-r border-dashed border-slate-200 dark:border-darkmode-300 xl:mx-5"
-          ></div>
-          <div>
-            <div class="text-lg font-medium text-slate-500 xl:text-xl">
-              10개
-            </div>
-            <div class="mt-0.5 text-slate-500">누적</div>
-          </div>
-        </div>
-      </div>
-      <div class="text-lg font-medium text-center -mt-10">실시간 생산 현황</div>
-
-      <div><LineChart1 :height="300" class="mt-5 -mb-6" /></div>
-    </div>
-    <!--KPI 시간당 생산량 차트-->
-    <div v-if="bottom == bottom_list[1]" class="p-5 mt-12 intro-y box sm:mt-5">
-      <div class="flex flex-col md:flex-row md:items-center">
-        <div class="flex">
-          <div>
-            <div
-              class="text-lg font-medium text-primary dark:text-slate-300 xl:text-xl"
-            >
-              4,710개
-            </div>
-            <div class="mt-0.5 text-slate-500">이번 달</div>
-          </div>
-          <div
-            class="w-px h-12 mx-4 border border-r border-dashed border-slate-200 dark:border-darkmode-300 xl:mx-5"
-          ></div>
-          <div>
-            <div class="text-lg font-medium text-slate-500 xl:text-xl">
-              2,130개
-            </div>
-            <div class="mt-0.5 text-slate-500">지난 달</div>
-          </div>
-        </div>
-      </div>
-      <div class="text-lg font-medium text-center -mt-10">
-        KPI - 월 평균 시간당 생산량
-      </div>
-
-      <div><LineChart2 :height="300" class="mt-5 -mb-6" /></div>
-    </div>
-    <!--KPI 재고비용 차트-->
-    <div v-if="bottom == bottom_list[2]" class="p-5 mt-12 intro-y box sm:mt-5">
-      <div class="flex flex-col md:flex-row md:items-center">
-        <div class="flex">
-          <div>
-            <div
-              class="text-lg font-medium text-primary dark:text-slate-300 xl:text-xl"
-            >
-              310개
-            </div>
-            <div class="mt-0.5 text-slate-500">이번 달</div>
-          </div>
-          <div
-            class="w-px h-12 mx-4 border border-r border-dashed border-slate-200 dark:border-darkmode-300 xl:mx-5"
-          ></div>
-          <div>
-            <div class="text-lg font-medium text-slate-500 xl:text-xl">
-              320개
-            </div>
-            <div class="mt-0.5 text-slate-500">지난 달</div>
-          </div>
-        </div>
-      </div>
-      <div class="text-lg font-medium text-center -mt-10">
-        KPI / 월간 재고 비용 절감률
-      </div>
-      <div><LineChart3 :height="300" class="mt-5 -mb-6" /></div>
-    </div>
-    <!-- END: Chart -->
-    <!--안전재고 미달 리스트-->
-    <div v-if="bottom == bottom_list[3]" class="p-5 mt-12 intro-y box sm:mt-5">
-      <div class="flex flex-col md:flex-row md:items-center">
-        <div class="flex">
-          <div>
-            <div
-              class="text-lg font-medium text-primary dark:text-slate-300 xl:text-xl"
-            >
-              10개
-            </div>
-            <div class="mt-0.5 text-slate-500">이번 달</div>
-          </div>
-          <div
-            class="w-px h-12 mx-4 border border-r border-dashed border-slate-200 dark:border-darkmode-300 xl:mx-5"
-          ></div>
-          <div>
-            <div class="text-lg font-medium text-slate-500 xl:text-xl">
-              30개
-            </div>
-            <div class="mt-0.5 text-slate-500">지난 달</div>
-          </div>
-        </div>
-      </div>
-      <div class="text-lg font-medium text-center -mt-10">
-        안전재고 미달 리스트
-      </div>
-
-      <!-- BEGIN: Data List -->
-      <!-- style="height: calc(100vh - 350px)" : 브라우저 화면 창크기에 맞게 변경됨 -->
-      <div
-        class="col-span-12 overflow-auto intro-y lg:overflow-visible"
-        id="printMe"
+  <!-- style="height: calc(100vh - 250px)" : 브라우저 화면 창크기에 맞게 변경됨 : 100vh - 브라우저 창 크기 -->
+  <div class="grid grid-cols-12 gap-1 mt-1">
+    <div
+      class="flex flex-wrap items-center col-span-12 ml-1 mt-2 mb-2 intro-y sm:flex-nowrap"
+    >
+      <Button
+        class="mr-2 shadow-md"
+        as="a"
+        variant="primary"
+        @click="exportFile(datas)"
       >
-        <div
-          class="mt-5"
-          style="overflow-y: scroll; overflow-x: hidden; height: 300px"
-        >
-          <Table class="border-spacing-y-[10px] border-separate -mt-2">
-            <Table.Thead
-              class="bg-slate-100"
-              style="position: sticky; top: 0px; z-index: 2"
-            >
-              <Table.Tr>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[0]"
-                >
-                  순번
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[1]"
-                >
-                  품목코드
-                </Table.Th>
-                <Table.Th
-                  class="border-b-0 whitespace-nowrap"
-                  :style="table_width[2]"
-                >
-                  거래처명
-                </Table.Th>
-                <Table.Th
-                  class="border-b-0 whitespace-nowrap"
-                  :style="table_width[3]"
-                >
-                  품명
-                </Table.Th>
-                <Table.Th
-                  class="border-b-0 whitespace-nowrap"
-                  :style="table_width[4]"
-                >
-                  규격
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[5]"
-                >
-                  단위
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[6]"
-                >
-                  재고수
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[7]"
-                >
-                  안전재고수
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[8]"
-                >
-                  부족재고수
-                </Table.Th>
-                <Table.Th
-                  class="text-center border-b-0 whitespace-nowrap"
-                  :style="table_width[9]"
-                >
-                  링크
-                </Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody style="position: relative; z-index: 1">
-              <Table.Tr
-                v-for="(todo, index) in monitor_safe.dataAll.value"
-                :key="todo.NO"
-                class="intro-x"
-              >
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-5 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[0]"
-                >
-                  <div>{{ index + 1 + (currentPage - 1) * rowsPerPage }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[1]"
-                >
-                  <div>{{ todo.품목코드 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[2]"
-                >
-                  <div>{{ todo.거래처명 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-50 bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[3]"
-                >
-                  <div>{{ todo.품명 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-5 bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[4]"
-                >
-                  <div>{{ todo.규격 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[5]"
-                >
-                  <div>{{ todo.단위 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-10 text-center text-danger bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[6]"
-                >
-                  <div>{{ todo.재고수 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[7]"
-                >
-                  <div>{{ todo.안전재고수 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white text-danger border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[8]"
-                >
-                  <div>{{ todo.부족재고수 }}</div>
-                </Table.Td>
-                <Table.Td
-                  class="first:rounded-l-md last:rounded-r-md w-40 bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
-                  :style="table_width[9]"
-                >
-                  <div class="flex items-center justify-center">
-                    <Lucide icon="Link" class="w-4 h-4 mr-2" />
-                    <a href="/monitor/safe">바로가기</a>
-                  </div>
-                </Table.Td>
-              </Table.Tr>
-            </Table.Tbody>
-          </Table>
-          <div
-            class="text-center mt-20"
-            v-if="monitor_safe.dataCount.value == 0"
-          >
-            저장된 데이터가 없습니다.
-          </div>
+        <Lucide icon="Download" class="w-4 h-4 mr-2" />
+        다운로드 (현재 페이지)
+      </Button>
+      <Button
+        class="mr-2 shadow-md"
+        as="a"
+        variant="primary"
+        @click="exportFile(dataAll)"
+      >
+        <Lucide icon="Download" class="w-4 h-4 mr-2" />
+        다운로드 (전체)
+      </Button>
+
+      <div class="hidden mx-auto md:block text-slate-500"></div>
+
+      <div class="mr-5">
+        <a href="" class="flex items-center ml-auto text-primary">
+          <Lucide icon="RefreshCcw" class="w-4 h-4 mr-3" /> 새로고침
+        </a>
+      </div>
+
+      <div>
+        <Button
+          class="mr-2 shadow-md"
+          as="a"
+          size="sm"
+          variant="outline-primary"
+          @click="reset_date"
+          title="기간 초기화"
+          ><Lucide icon="CalendarX" class="w-5 h-5"
+        /></Button>
+      </div>
+
+      <div class="text-center">
+        <div>
+          <Litepicker
+            id="litepicker"
+            v-model="now2"
+            :options="{
+              autoApply: false,
+              singleMode: false,
+              numberOfColumns: 1,
+              numberOfMonths: 1,
+              showWeekNumbers: true,
+              dropdowns: {
+                minYear: Number(min_year),
+                maxYear: Number(max_year),
+                months: true,
+                years: true,
+              },
+              lang: 'ko',
+              format: 'YY/MM/DD',
+              delimiter: ' - ',
+              buttonText: { reset: '초기화', apply: '적용', cancel: '취소' },
+            }"
+            class="block w-40 mx-auto !box"
+            placeholder="전체기간"
+          />
         </div>
       </div>
-      <!-- END: Data List -->
+      <div class="ml-2">
+        <FormSelect v-model="searchKey" class="w-30 mt-3 !box sm:mt-0">
+          <option>전체</option>
+          <option>품목코드</option>
+          <option>거래처명</option>
+          <option>품명</option>
+          <option>규격</option>
+          <option>비고</option>
+        </FormSelect>
+      </div>
+      <div class="w-full mt-3 sm:w-auto sm:mt-0 sm:ml-auto md:ml-2">
+        <div class="relative w-56 text-slate-500">
+          <FormInput
+            type="text"
+            class="w-56 pr-10 !box"
+            v-model="searchInput"
+            @keyup.enter="
+              () => {
+                search();
+                pageChange();
+              }
+            "
+            placeholder="검색어를 입력해주세요"
+          />
+          <button
+            @click="
+              {
+                search();
+                pageChange();
+              }
+            "
+          >
+            <Lucide
+              icon="Search"
+              class="absolute inset-y-0 right-0 w-4 h-4 my-auto mr-3"
+            />
+          </button>
+        </div>
+      </div>
+      <div class="ml-2 mr-4">
+        <!-- BEGIN: Pagination Pages-->
+        <FormSelect
+          class="w-20 mt-3 !box sm:mt-0"
+          v-model="rowsPerPage"
+          @change="pageChange"
+        >
+          <option>10</option>
+          <option>25</option>
+          <option>35</option>
+          <option>50</option>
+        </FormSelect>
+        <!-- END: Pagination Pages-->
+      </div>
     </div>
-
-    <!-- BEGIN: FOOTER(COPYRIGHT) -->
-    <div class="intro-y mt-3" style="text-align: right">
-      <footer>&copy;2023 QInnotek. All rights reserved.</footer>
+    <!-- BEGIN: Pagination-->
+    <div
+      class="flex flex-wrap items-center col-span-12 mt-0 intro-y sm:flex-nowrap"
+    >
+      <div>
+        <PaginationComponent
+          class="pagination-component"
+          v-model="currentPage"
+          :numberOfPages="numberOfPages"
+          @click="resetCheckBox()"
+        />
+      </div>
+      <div class="hidden mx-auto md:block text-slate-500"></div>
+      <div>
+        <span class="mr-3">[ {{ dataCount }}개 데이터 조회됨 ] </span>
+        <span class="mr-5"
+          >[ {{ currentPage }} / {{ numberOfPages }} 페이지 ]</span
+        >
+        <!-- END: Pagination-->
+      </div>
     </div>
-    <!-- END: FOOTER(COPYRIGHT) -->
+    <!-- BEGIN: Data List -->
+    <!-- style="height: calc(100vh - 350px)" : 브라우저 화면 창크기에 맞게 변경됨 -->
+    <div
+      class="col-span-12 overflow-auto intro-y lg:overflow-visible"
+      id="printMe"
+    >
+      <div
+        class="mr-3"
+        style="overflow-y: scroll; overflow-x: hidden; height: 580px"
+      >
+        <Table class="border-spacing-y-[8px] border-separate -mt-2">
+          <Table.Thead
+            class="bg-slate-100"
+            style="position: sticky; top: 0px; z-index: 2"
+          >
+            <Table.Tr>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                id="checkbox"
+                :style="table_width[0]"
+              >
+                <Input
+                  class="transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed"
+                  id="checkbox_all"
+                  type="checkbox"
+                  :value="mainCheckBox"
+                  @click="
+                    () => {
+                      checkAll(mainCheckBox);
+                      mainCheckBox = !mainCheckBox;
+                    }
+                  "
+                />
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[1]"
+              >
+                순번
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[2]"
+              >
+                입고일시
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[3]"
+              >
+                품목코드
+              </Table.Th>
+              <Table.Th
+                class="border-b-0 whitespace-nowrap"
+                :style="table_width[4]"
+              >
+                거래처명
+              </Table.Th>
+              <Table.Th
+                class="border-b-0 whitespace-nowrap"
+                :style="table_width[5]"
+              >
+                품명
+              </Table.Th>
+              <Table.Th
+                class="border-b-0 whitespace-nowrap"
+                :style="table_width[6]"
+              >
+                규격
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[7]"
+              >
+                단위
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[8]"
+              >
+                입고수
+              </Table.Th>
+              <Table.Th
+                class="text-center border-b-0 whitespace-nowrap"
+                :style="table_width[9]"
+              >
+                비고
+              </Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody style="position: relative; z-index: 1">
+            <Table.Tr
+              v-for="(todo, index) in datas"
+              :key="todo.NO"
+              class="intro-x"
+            >
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-5 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                id="checkbox"
+                :style="table_width[0]"
+              >
+                <input
+                  class="transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed"
+                  id="checkbox"
+                  type="checkbox"
+                  :value="todo.NO"
+                  v-model="checkDebug"
+                />
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-5 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[1]"
+              >
+                <div>{{ index + 1 + (currentPage - 1) * rowsPerPage }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[2]"
+              >
+                <div>
+                  {{ moment(todo.입고일시).format("YYYY-MM-DD HH:mm") }}
+                </div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[3]"
+              >
+                <div>{{ todo.품목코드 }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[4]"
+              >
+                <div>{{ todo.거래처명 }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-50 bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[5]"
+              >
+                <div>{{ todo.품명 }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-5 bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[6]"
+              >
+                <div>{{ todo.규격 }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[7]"
+              >
+                <div>{{ todo.단위 }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[8]"
+              >
+                <div>{{ todo.입고수?.toLocaleString() }}</div>
+              </Table.Td>
+              <Table.Td
+                class="first:rounded-l-md last:rounded-r-md w-10 text-center bg-white border-b-0 dark:bg-darkmode-600 shadow-[20px_3px_20px_#0000000b]"
+                :style="table_width[9]"
+              >
+                <div>{{ todo.비고 }}</div>
+              </Table.Td>
+            </Table.Tr>
+          </Table.Tbody>
+        </Table>
+        <div class="text-center mt-20" v-if="dataCount == 0">
+          저장된 데이터가 없습니다.
+        </div>
+      </div>
+    </div>
+    <!-- END: Data List -->
   </div>
+  <!-- BEGIN: FOOTER(COPYRIGHT) -->
+  <div class="intro-y mt-5 mr-5" style="text-align: right">
+    <footer>&copy;2023 QInnotek. All rights reserved.</footer>
+  </div>
+  <!-- END: FOOTER(COPYRIGHT) -->
 </template>

@@ -74,7 +74,7 @@ const hideSearchDropdown = () => {
             props.layout == 'simple-menu' && 'hidden',
           ]"
         >
-          KOREA NAGANO
+          NTSL
         </span>
       </RouterLink>
       <!-- END: Logo -->
@@ -87,7 +87,9 @@ const hideSearchDropdown = () => {
           props.layout == 'top-menu' && 'md:pl-10',
         ]"
       >
-        <Breadcrumb.Link>메인</Breadcrumb.Link>
+        <Breadcrumb.Link
+          >NTSL 두께 측정기 데이터 다운로드 프로그램</Breadcrumb.Link
+        >
         <Breadcrumb.Link v-if="$route.meta.category != undefined">
           {{ $route.meta.category }}
         </Breadcrumb.Link>
