@@ -1,0 +1,13 @@
+@media print {
+  #edit{opacity:0;visibility:hidden;display:none;}
+  #checkbox{opacity:0;visibility:hidden;display:none;}
+  table{font-size:10px;}
+  @page {
+    size: landscape;
+    size: 100%;
+    margin-left:0;
+    margin-right:0;
+  }
+  body{
+  }
+}
